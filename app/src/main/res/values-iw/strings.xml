@@ -1,6 +1,7 @@
 <resources>
     <!-- Splash screen (Hebrew) -->
-    <string name="splash_loading_data">טוען נתונים…</string>
+    <string name="splash_loading_data">מכין את נתוני התחבורה הלא־מקוונים…</string>
+    <string name="splash_data_install_failed">הכנת הנתונים נכשלה. יש לבדוק מקום פנוי במכשיר וללחוץ כאן לניסיון חוזר.</string>
 
     <!-- MOTIS foreground service (Hebrew) -->
     <string name="motis_channel_name">מנוע הניווט</string>
