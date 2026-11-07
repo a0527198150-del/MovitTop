@@ -140,9 +140,14 @@ dependencies {
 val bundledTransitAssets = layout.buildDirectory.dir("generated/bundledTransitData/assets")
 val prepareBundledTransitData = tasks.register("prepareBundledTransitData") {
     val destination = bundledTransitAssets.map { it.file("motis-data.zip") }
+    val manifest = bundledTransitAssets.map { it.file("motis-data.version") }
     val overridePath = providers.gradleProperty("movitopDataZip")
     inputs.property("dataZipOverride", overridePath.orElse("published-release"))
+    if (overridePath.isPresent) {
+        inputs.file(file(overridePath.get()))
+    }
     outputs.file(destination)
+    outputs.file(manifest)
     doLast {
         val output = destination.get().asFile
         output.parentFile.mkdirs()
@@ -191,7 +196,18 @@ val prepareBundledTransitData = tasks.register("prepareBundledTransitData") {
                 "Missing line_schedules.sqlite in bundled transit archive"
             }
         }
-        logger.lifecycle("Bundled offline transit data: ${output.length()} bytes")
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        output.inputStream().buffered().use { stream ->
+            val buffer = ByteArray(1024 * 1024)
+            while (true) {
+                val n = stream.read(buffer)
+                if (n < 0) break
+                digest.update(buffer, 0, n)
+            }
+        }
+        val sha256 = digest.digest().joinToString("") { "%02x".format(it) }
+        manifest.get().asFile.writeText(sha256 + "\n")
+        logger.lifecycle("Bundled offline transit data: ${output.length()} bytes, SHA-256 ${sha256}")
     }
 }
 
