@@ -142,7 +142,7 @@ jobs:
         if: steps.check.outputs.skip != 'true'
         run: |
           chmod +x ./gradlew
-          ./gradlew --no-daemon assembleDebug \\
+          ./gradlew --no-daemon assembleDebug \
             -PmovitopDataZip="${{ github.workspace }}/movitop-data-latest.zip"
 
       - name: Upload installable test APK containing offline transit data
