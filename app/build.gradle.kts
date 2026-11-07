@@ -1,4 +1,7 @@
 import java.util.Properties
+import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
 
 plugins {
     alias(libs.plugins.android.application)
@@ -121,4 +124,80 @@ dependencies {
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
+}
+
+/**
+ * Every APK must carry the complete offline transit graph, line-schedule DB,
+ * timezone files and Mapsforge map. Do not silently emit a broken "offline"
+ * APK without this archive.
+ *
+ * For reproducible builds, supply -PmovitopDataZip=/path/to/verified.zip
+ * (the weekly CI job uses its freshly generated archive). In ordinary local
+ * builds the original project's published snapshot is downloaded once into
+ * Gradle's build directory. This download runs on the developer/CI machine,
+ * NEVER on the installed Android device.
+ */
+val bundledTransitAssets = layout.buildDirectory.dir("generated/bundledTransitData/assets")
+val prepareBundledTransitData = tasks.register("prepareBundledTransitData") {
+    val destination = bundledTransitAssets.map { it.file("motis-data.zip") }
+    val overridePath = providers.gradleProperty("movitopDataZip")
+    inputs.property("dataZipOverride", overridePath.orElse("published-release"))
+    outputs.file(destination)
+    doLast {
+        val output = destination.get().asFile
+        output.parentFile.mkdirs()
+        if (overridePath.isPresent) {
+            val local = file(overridePath.get())
+            check(local.isFile && local.length() > 1_000_000L) {
+                "Transit data ZIP not found or empty: ${local.absolutePath}"
+            }
+            local.copyTo(output, overwrite = true)
+        } else {
+            val downloadUrl =
+                "https://github.com/a-true-man/MovitTop/releases/download/transit-data-latest/movitop-data-latest.zip"
+            val part = File(output.parentFile, output.name + ".part")
+            try {
+                val connection = URL(downloadUrl).openConnection() as HttpURLConnection
+                connection.connectTimeout = 30_000
+                connection.readTimeout = 120_000
+                connection.instanceFollowRedirects = true
+                try {
+                    check(connection.responseCode in 200..299) {
+                        "Cannot download transit data: HTTP ${connection.responseCode}"
+                    }
+                    connection.inputStream.use { input ->
+                        part.outputStream().buffered().use { input.copyTo(it, 1024 * 1024) }
+                    }
+                } finally {
+                    connection.disconnect()
+                }
+                check(part.length() > 1_000_000L) { "Downloaded transit archive is empty" }
+                if (output.exists()) output.delete()
+                check(part.renameTo(output)) { "Cannot activate downloaded transit data archive" }
+            } finally {
+                if (part.exists()) part.delete()
+            }
+        }
+
+        // Check the content, not just the file extension. Graph and schedules
+        // must both exist or the installation cannot work.
+        java.util.zip.ZipFile(output).use { zip ->
+            check(zip.getEntry("config.yml") != null ||
+                zip.getEntry("./config.yml") != null) {
+                "Missing MOTIS config.yml in bundled transit archive"
+            }
+            check(zip.getEntry("line_schedules.sqlite") != null ||
+                zip.getEntry("./line_schedules.sqlite") != null) {
+                "Missing line_schedules.sqlite in bundled transit archive"
+            }
+        }
+        logger.lifecycle("Bundled offline transit data: ${output.length()} bytes")
+    }
+}
+
+android.sourceSets.getByName("main").assets.srcDir(bundledTransitAssets)
+tasks.configureEach {
+    if (name.startsWith("merge") && name.endsWith("Assets")) {
+        dependsOn(prepareBundledTransitData)
+    }
 }
