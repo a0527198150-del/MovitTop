@@ -1,0 +1,63 @@
+name: Publish Windows-compatible offline APK
+
+on:
+  push:
+    branches:
+      - feature/bundled-offline-transit-data
+    paths:
+      - .github/workflows/publish-windows-compatible-apk.yml
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Recover the previously verified APK
+        uses: actions/download-artifact@v4
+        with:
+          run-id: 42398508211
+          github-token: ${{ github.token }}
+          name: MovitTop-offline-arm64-debug
+          path: downloaded
+
+      - name: Verify APK structure
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s downloaded/app-debug.apk
+          cp downloaded/app-debug.apk MovitTop-offline.apk
+          unzip -Z -1 MovitTop-offline.apk | grep -Fx 'assets/motis-data.zip'
+          unzip -Z -1 MovitTop-offline.apk | grep -Fx 'assets/motis-data.version'
+          sha256sum MovitTop-offline.apk
+
+      - name: Produce a legacy encrypted ZIP compatible with Windows Explorer
+        shell: bash
+        env:
+          ZIP_PASSWORD: 'MovitTop-Offline-2026!'
+        run: |
+          set -euo pipefail
+          # ZipCrypto is intentionally used instead of AES because the
+          # built-in Windows Compressed Folders extractor cannot read ZIP AES.
+          # This is compatibility obfuscation, NOT strong cryptographic security.
+          zip -j -0 -P "$ZIP_PASSWORD" MovitTop-offline-Windows.zip MovitTop-offline.apk
+          test -s MovitTop-offline-Windows.zip
+          expected="$(sha256sum MovitTop-offline.apk | cut -d ' ' -f1)"
+          actual="$(unzip -P "$ZIP_PASSWORD" -p MovitTop-offline-Windows.zip MovitTop-offline.apk | sha256sum | cut -d ' ' -f1)"
+          test "$actual" = "$expected"
+          echo "ZIP encryption and extracted APK hash verified"
+          ls -lh MovitTop-offline-Windows.zip MovitTop-offline.apk
+
+      - name: Publish alternative archives as GitHub Release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release upload movitop-offline-encrypted \
+            MovitTop-offline-Windows.zip MovitTop-offline.apk --clobber
+          gh release edit movitop-offline-encrypted \
+            --notes "Offline test APK (debug signed). Three download formats: (1) MovitTop-offline.apk: direct APK; (2) MovitTop-offline-Windows.zip: password-protected legacy ZipCrypto ZIP compatible with Windows Explorer, password MovitTop-Offline-2026!; (3) MovitTop-offline-AES256.zip: strong AES-256 ZIP that requires 7-Zip (not Windows Explorer), same password. Note: ZipCrypto is not strong encryption. Offline data snapshot from upstream 2026-09-29. First launch extracts a large data package and requires ample free storage."
