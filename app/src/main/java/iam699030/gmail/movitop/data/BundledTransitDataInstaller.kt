@@ -2,7 +2,6 @@ package iam699030.gmail.movitop.data
 
 import android.content.Context
 import android.util.Log
-import iam699030.gmail.movitop.BuildConfig
 import iam699030.gmail.movitop.MotisForegroundService
 import java.io.File
 import java.io.IOException
@@ -17,8 +16,8 @@ import java.util.zip.ZipInputStream
  * main thread. Extraction is streamed, staged and swapped with a backup so an
  * interrupted/failed installation does not destroy an older working dataset.
  *
- * Each APK version installs its bundled snapshot once. Updating the APK installs
- * the new bundled snapshot; subsequent launches do not re-extract gigabytes.
+ * Each distinct bundled archive installs once, identified by its SHA-256.
+ * Updating the APK with newer data installs the new bundled snapshot; subsequent launches do not re-extract gigabytes.
  */
 class BundledTransitDataInstaller(private val context: Context) {
 
@@ -27,7 +26,10 @@ class BundledTransitDataInstaller(private val context: Context) {
         val stageRoot = File(context.filesDir, "motis_data_bundle_staging")
         val backupRoot = File(context.filesDir, "motis_data_bundle_backup")
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val bundledVersion = BuildConfig.VERSION_CODE
+        val bundledVersion = context.assets.open(VERSION_ASSET).bufferedReader().use { it.readText().trim() }
+        if (!bundledVersion.matches(Regex("[0-9a-f]{64}"))) {
+            throw IOException("Invalid bundled transit archive version")
+        }
 
         // A previous process might have died between moving live -> backup and
         // moving stage -> live. Restore the known-good version in that case.
@@ -37,7 +39,7 @@ class BundledTransitDataInstaller(private val context: Context) {
             }
         }
 
-        if (prefs.getInt(KEY_BUNDLED_VERSION, -1) == bundledVersion && isComplete(liveRoot)) {
+        if (prefs.getString(KEY_BUNDLED_VERSION, null) == bundledVersion && isComplete(liveRoot)) {
             return@synchronized
         }
 
@@ -70,7 +72,7 @@ class BundledTransitDataInstaller(private val context: Context) {
                 throw IOException("Could not activate the bundled transit data")
             }
 
-            if (!prefs.edit().putInt(KEY_BUNDLED_VERSION, bundledVersion).commit()) {
+            if (!prefs.edit().putString(KEY_BUNDLED_VERSION, bundledVersion).commit()) {
                 Log.w(TAG, "Transit data installed, but version marker could not be persisted")
             }
             if (backupRoot.exists() && !backupRoot.deleteRecursively()) {
@@ -135,6 +137,7 @@ class BundledTransitDataInstaller(private val context: Context) {
     companion object {
         private const val TAG = "BundledTransitData"
         private const val ARCHIVE_NAME = "motis-data.zip"
+        private const val VERSION_ASSET = "motis-data.version"
         private const val PREFS_NAME = "bundled_transit_data"
         private const val KEY_BUNDLED_VERSION = "installed_apk_version"
         private const val MAX_FILES = 100_000
