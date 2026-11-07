@@ -122,6 +122,38 @@ jobs:
           ./package_motis_data.sh "movitop-data-latest.zip"
           echo "build_date=${BUILD_DATE}" >> "$GITHUB_OUTPUT"
 
+
+      # Assemble an APK with precisely the same new data that was just compiled.
+      # This is a developer/test artifact (debug-signed), NOT a production
+      # release APK. A separately managed release keystore is required for
+      # production signing.
+      - name: Configure Java for Android build
+        if: steps.check.outputs.skip != 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Configure Android SDK
+        if: steps.check.outputs.skip != 'true'
+        uses: android-actions/setup-android@v3
+
+      - name: Build APK with bundled offline data
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon assembleDebug \
+            -PmovitopDataZip="${{ github.workspace }}/movitop-data-latest.zip"
+
+      - name: Upload installable test APK containing offline transit data
+        if: steps.check.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: movitop-offline-debug-${{ steps.package.outputs.build_date }}
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14
+          if-no-files-found: error
+
       - name: Publish as a rolling GitHub Release
         if: steps.check.outputs.skip != 'true'
         env:

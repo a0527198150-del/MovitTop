@@ -6,7 +6,8 @@
     <string name="splash_logo_text" translatable="false">MovitTop</string>
     <string name="splash_powered_by" translatable="false">Powered by</string>
     <string name="splash_powered_by_motis" translatable="false">Motis</string>
-    <string name="splash_loading_data">Loading data…</string>
+    <string name="splash_loading_data">Preparing offline transit data…</string>
+    <string name="splash_data_install_failed">Could not prepare offline data. Check free storage and tap here to retry.</string>
 
     <!-- MOTIS foreground service -->
     <string name="motis_channel_name">Navigation Engine</string>
