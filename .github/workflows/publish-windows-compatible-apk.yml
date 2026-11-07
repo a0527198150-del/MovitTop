@@ -17,6 +17,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
+      - name: Check out repository for GitHub CLI
+        uses: actions/checkout@v4
+
       - name: Recover the previously verified APK
         uses: actions/download-artifact@v4
         with:
