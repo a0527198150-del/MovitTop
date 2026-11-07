@@ -25,9 +25,6 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Configure Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Install Android 36 SDK platform and build tools
         run: |
           yes | sdkmanager --licenses >/dev/null || true
