@@ -9,6 +9,8 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import iam699030.gmail.movitop.data.BundledTransitDataInstaller
+import android.util.Log
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -44,18 +46,41 @@ class SplashActivity : AppCompatActivity() {
         loadingIndicator = findViewById(R.id.loadingIndicator)
         loadingText = findViewById(R.id.loadingText)
 
-        // Kick off the routing engine as early as possible — the animation
-        // below and the graph load then happen concurrently.
-        MotisForegroundService.start(this)
-
         animateIn()
+        installDataAndStart()
 
+        // If installation fails (for example, insufficient free storage), the
+        // user can tap the status text to retry without clearing application data.
+        loadingText.setOnClickListener { installDataAndStart() }
+    }
+
+    private var installationRunning = false
+
+    private fun installDataAndStart() {
+        if (installationRunning) return
+        installationRunning = true
+        loadingIndicator.visibility = android.view.View.VISIBLE
+        loadingText.text = getString(R.string.splash_loading_data)
         lifecycleScope.launch {
             val startedAt = System.currentTimeMillis()
-            waitForEngineReady(MAX_ENGINE_WAIT_MS)
-            val elapsed = System.currentTimeMillis() - startedAt
-            if (elapsed < MIN_SPLASH_MS) delay(MIN_SPLASH_MS - elapsed)
-            goToMain()
+            try {
+                withContext(Dispatchers.IO) {
+                    BundledTransitDataInstaller(applicationContext).ensureInstalled()
+                }
+                // Do not start MOTIS until the complete graph and schedule DB
+                // have been extracted and atomically installed.
+                MotisForegroundService.start(this@SplashActivity)
+                waitForEngineReady(MAX_ENGINE_WAIT_MS)
+                val elapsed = System.currentTimeMillis() - startedAt
+                if (elapsed < MIN_SPLASH_MS) delay(MIN_SPLASH_MS - elapsed)
+                goToMain()
+            } catch (e: Exception) {
+                Log.e("SplashActivity", "Bundled transit data installation failed", e)
+                loadingIndicator.visibility = android.view.View.GONE
+                loadingText.text = getString(R.string.splash_data_install_failed)
+            } finally {
+                installationRunning = false
+            }
         }
     }
 
