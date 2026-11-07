@@ -2,6 +2,8 @@ import java.util.Properties
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.zip.ZipFile
+import java.security.MessageDigest
 
 plugins {
     alias(libs.plugins.android.application)
@@ -186,7 +188,7 @@ val prepareBundledTransitData = tasks.register("prepareBundledTransitData") {
 
         // Check the content, not just the file extension. Graph and schedules
         // must both exist or the installation cannot work.
-        java.util.zip.ZipFile(output).use { zip ->
+        ZipFile(output).use { zip ->
             check(zip.getEntry("config.yml") != null ||
                 zip.getEntry("./config.yml") != null) {
                 "Missing MOTIS config.yml in bundled transit archive"
@@ -196,7 +198,7 @@ val prepareBundledTransitData = tasks.register("prepareBundledTransitData") {
                 "Missing line_schedules.sqlite in bundled transit archive"
             }
         }
-        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        val digest = MessageDigest.getInstance("SHA-256")
         output.inputStream().buffered().use { stream ->
             val buffer = ByteArray(1024 * 1024)
             while (true) {
