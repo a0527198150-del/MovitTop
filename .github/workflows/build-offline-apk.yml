@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-apk:
@@ -63,3 +63,62 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 30
+
+      - name: Produce AES-256 encrypted ZIP (containing the APK)
+        env:
+          ZIP_PASSWORD: 'MovitTop-Offline-2026!'
+        run: |
+          python -m pip install --quiet pyzipper==0.3.6
+          python - <<'PY'
+          import hashlib
+          import os
+          from pathlib import Path
+          import zipfile
+          import pyzipper
+
+          apk = Path("app/build/outputs/apk/debug/app-debug.apk")
+          output = Path("MovitTop-offline-AES256.zip")
+          password = os.environ["ZIP_PASSWORD"].encode("utf-8")
+          original_hash = hashlib.file_digest(apk.open("rb"), "sha256").hexdigest()
+
+          # APKs are ZIP containers already; storing rather than recompressing
+          # keeps memory/CPU overhead low on the GitHub runner.
+          with pyzipper.AESZipFile(output, "w", compression=zipfile.ZIP_STORED, allowZip64=True) as archive:
+              archive.setpassword(password)
+              archive.setencryption(pyzipper.WZ_AES, nbits=256)
+              archive.write(apk, arcname="MovitTop-offline.apk")
+
+          # Independently decrypt the archive and stream-verify every byte,
+          # preventing empty/corrupt downloads from being published as valid.
+          with pyzipper.AESZipFile(output, "r") as archive:
+              archive.setpassword(password)
+              assert archive.namelist() == ["MovitTop-offline.apk"]
+              digest = hashlib.sha256()
+              with archive.open("MovitTop-offline.apk") as payload:
+                  while chunk := payload.read(1024 * 1024):
+                      digest.update(chunk)
+              assert digest.hexdigest() == original_hash, "Decrypted APK checksum mismatch"
+
+          assert output.stat().st_size > 100_000_000, "Unexpectedly small encrypted ZIP"
+          print("Encrypted ZIP created and verified:", output.stat().st_size, "bytes")
+          print("APK SHA-256:", original_hash)
+          PY
+
+      - name: Publish encrypted ZIP as a direct GitHub Release download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="movitop-offline-encrypted"
+          ZIP="MovitTop-offline-AES256.zip"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ZIP" --clobber
+            gh release edit "$TAG" \
+              --title "MovitTop Offline — encrypted test APK" \
+              --notes "AES-256 encrypted ZIP containing a debug-signed offline APK. Extract using 7-Zip. Password: MovitTop-Offline-2026! Data snapshot: upstream public transit package (2026-09-29)."
+          else
+            gh release create "$TAG" "$ZIP" \
+              --target "$GITHUB_SHA" \
+              --title "MovitTop Offline — encrypted test APK" \
+              --notes "AES-256 encrypted ZIP containing a debug-signed offline APK. Extract using 7-Zip. Password: MovitTop-Offline-2026! Data snapshot: upstream public transit package (2026-09-29)." \
+              --prerelease
+          fi
