@@ -1,0 +1,68 @@
+# Build a self-contained ARM64 test APK: app + MOTIS + offline transit data.
+# This workflow runs on the feature branch without merging untested changes.
+name: Build offline APK
+
+on:
+  push:
+    branches:
+      - feature/bundled-offline-transit-data
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Check out fork branch
+        uses: actions/checkout@v4
+
+      - name: Configure JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Configure Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android 36 SDK platform and build tools
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Download complete offline transit data for bundling
+        run: |
+          curl -fL --retry 4 --retry-delay 10 --connect-timeout 30 \
+            -o "${RUNNER_TEMP}/movitop-transit.zip" \
+            "https://github.com/a-true-man/MovitTop/releases/download/transit-data-latest/movitop-data-latest.zip"
+          echo "Downloaded archive size:"
+          du -h "${RUNNER_TEMP}/movitop-transit.zip"
+
+      - name: Build debug APK containing the full transit archive
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon --stacktrace assembleDebug \
+            -PmovitopDataZip="${RUNNER_TEMP}/movitop-transit.zip"
+
+      - name: Verify APK includes transit ZIP and content SHA
+        run: |
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          unzip -Z -1 "$APK" | grep -Fx 'assets/motis-data.zip'
+          unzip -Z -1 "$APK" | grep -Fx 'assets/motis-data.version'
+          unzip -p "$APK" assets/motis-data.version | grep -E '^[0-9a-f]{64}$'
+          echo "Built APK:"
+          ls -lh "$APK"
+          sha256sum "$APK"
+
+      - name: Upload installable APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: MovitTop-offline-arm64-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
